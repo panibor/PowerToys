@@ -16,7 +16,7 @@
          - https://robmensching.com/blog/posts/2003/10/4/windows-installer-components-introduction/
            -->
 
-  <Package Name="PowerToys (Preview)" Language="1033" Version="$(var.Version)" Manufacturer="Microsoft Corporation" UpgradeCode="$(var.UpgradeCodeGUID)" Scope="$(var.InstallScope)">
+  <Package Name="PowerToys FancyZones Fork" Language="1033" Version="$(var.Version)" Manufacturer="Microsoft Corporation" UpgradeCode="$(var.UpgradeCodeGUID)" Scope="$(var.InstallScope)">
 
 
       
