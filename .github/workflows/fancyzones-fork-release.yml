@@ -1,0 +1,171 @@
+# FancyZones fork: rebase main-fork onto upstream main, build the per-user x64 installer
+# and publish it as a release on this fork so the in-app updater picks it up.
+name: FancyZones fork release
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if upstream has not moved since the last release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fancyzones-fork-release
+  cancel-in-progress: false
+
+env:
+  FORK_BRANCH: main-fork
+  UPSTREAM_REPO: https://github.com/microsoft/PowerToys.git
+
+jobs:
+  sync:
+    if: github.repository == 'panibor/PowerToys'
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      upstream_sha: ${{ steps.rebase.outputs.upstream_sha }}
+      fork_sha: ${{ steps.rebase.outputs.fork_sha }}
+      version: ${{ steps.rebase.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FORK_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.FORK_PUSH_TOKEN || github.token }}
+
+      - name: Rebase onto upstream main
+        id: rebase
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch --no-tags upstream main
+          upstream_sha=$(git rev-parse upstream/main)
+          if ! git rebase upstream/main; then
+            git rebase --abort
+            echo "::error::Rebase of $FORK_BRANCH onto upstream/main ($upstream_sha) hit conflicts. Rebase locally, push, then rerun."
+            exit 1
+          fi
+          train=$(sed -n 's:.*<ReleaseTrainVersion>\(.*\)</ReleaseTrainVersion>.*:\1:p' src/Version.props)
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          echo "fork_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$train.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to build
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.rebase.outputs.upstream_sha }}
+        run: |
+          last=$(gh release view --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | sed -n 's/^Upstream: \([0-9a-f]*\).*/\1/p' || true)
+          if [ "${{ inputs.force }}" = "true" ] || [ "$last" != "$UPSTREAM_SHA" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Upstream has not moved since the last release ($last). Skipping."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push rebased branch
+        if: steps.check.outputs.build == 'true'
+        env:
+          HAS_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN != '' }}
+        run: |
+          if [ "$HAS_PUSH_TOKEN" != "true" ]; then
+            echo "::warning::FORK_PUSH_TOKEN is not set, so the rebased $FORK_BRANCH is built but not pushed."
+            exit 0
+          fi
+          git push --force-with-lease origin "HEAD:$FORK_BRANCH"
+
+      - name: Bundle rebased tree
+        if: steps.check.outputs.build == 'true'
+        run: git bundle create rebased.bundle HEAD
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.build == 'true'
+        with:
+          name: rebased-bundle
+          path: rebased.bundle
+          retention-days: 3
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.build == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 360
+    env:
+      VERSION: ${{ needs.sync.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rebased-bundle
+
+      - name: Check out rebased tree
+        shell: pwsh
+        run: |
+          git clone --no-checkout rebased.bundle src-tree
+          Set-Location src-tree
+          git checkout --detach ${{ needs.sync.outputs.fork_sha }}
+          git remote set-url origin https://github.com/${{ github.repository }}.git
+          git submodule update --init --recursive
+
+      - name: Build installer
+        shell: pwsh
+        working-directory: src-tree
+        run: |
+          .\tools\build\build-installer.ps1 -Platform x64 -Configuration Release -PerUser true -Version $env:VERSION -Force
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Collect installer
+        id: collect
+        shell: pwsh
+        working-directory: src-tree
+        run: |
+          $setup = Get-ChildItem -Path installer\PowerToysSetupVNext -Recurse -Filter "*.exe" |
+            Where-Object { $_.Name -match 'PowerToysUserSetup' -and $_.FullName -match 'x64' } |
+            Select-Object -First 1
+          if (-not $setup) { throw "Per-user x64 installer not found" }
+          New-Item -ItemType Directory -Force ..\out | Out-Null
+          $name = "PowerToysUserSetup-FancyZonesFork-$env:VERSION-x64.exe"
+          Copy-Item $setup.FullName "..\out\$name"
+          Get-FileHash "..\out\$name" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $name" } | Set-Content "..\out\$name.sha256"
+          Get-ChildItem ..\out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: out/*
+          retention-days: 14
+
+  release:
+    needs: [sync, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: out
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.sync.outputs.version }}
+          UPSTREAM_SHA: ${{ needs.sync.outputs.upstream_sha }}
+          FORK_SHA: ${{ needs.sync.outputs.fork_sha }}
+        run: |
+          remote_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$FORK_BRANCH" --jq .sha)
+          if [ "$remote_sha" = "$FORK_SHA" ]; then target="$FORK_SHA"; else target="$remote_sha"; fi
+          {
+            echo "Upstream: $UPSTREAM_SHA"
+            echo "Built from: $FORK_SHA"
+            echo
+            echo "FancyZones-only build of PowerToys, rebased on upstream microsoft/PowerToys main."
+            echo "Self-signed, so Windows SmartScreen may warn on install."
+          } > notes.md
+          gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$target" \
+            --title "FancyZones Fork v$VERSION" --notes-file notes.md --latest
