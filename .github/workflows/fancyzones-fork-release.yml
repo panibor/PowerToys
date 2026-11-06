@@ -114,7 +114,27 @@ jobs:
           git remote set-url origin https://github.com/${{ github.repository }}.git
           git submodule update --init --recursive
 
+      - name: Pre-trust the signing certificate
+        shell: pwsh
+        run: |
+          # build-installer.ps1 imports its self-signed cert into CurrentUser\Root, which opens a
+          # modal "install this certificate?" dialog that hangs a headless runner. Trusting it in
+          # LocalMachine\Root (no dialog as admin) makes it show up in CurrentUser\Root too, so the
+          # script finds it there and skips that import.
+          $subject = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+          $cert = New-SelfSignedCertificate -Subject $subject -CertStoreLocation Cert:\CurrentUser\My `
+            -KeyAlgorithm RSA -Type CodeSigningCert -HashAlgorithm SHA256
+          $cer = "$env:RUNNER_TEMP\fork_sign.cer"
+          Export-Certificate -Cert $cert -FilePath $cer -Force | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+          if (-not (Get-ChildItem Cert:\CurrentUser\Root | Where-Object Thumbprint -eq $cert.Thumbprint)) {
+            throw "Certificate is not visible in CurrentUser\Root, the build would hang on a dialog"
+          }
+          Write-Host "Pre-trusted signing certificate $($cert.Thumbprint)"
+
       - name: Build installer
+        timeout-minutes: 150
         shell: pwsh
         working-directory: src-tree
         run: |
