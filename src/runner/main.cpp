@@ -342,6 +342,9 @@ int runner(bool isProcessElevated, bool openSettings, std::string settingsWindow
             L"PowerToys.AltWindowCycle.dll",
         };
 
+        // FancyZones fork: load only the FancyZones module.
+        knownModules = { L"PowerToys.FancyZonesModuleInterface.dll" };
+
         for (auto moduleSubdir : knownModules)
         {
             try

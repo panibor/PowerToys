@@ -142,6 +142,35 @@ namespace Microsoft.PowerToys.Settings.UI.Views
                     _searchSuggestions.Add(child.Content?.ToString());
                 }
             }
+
+            HideNonFancyZonesNavigationItems(topLevelItems);
+        }
+
+        // FancyZones fork: show only Dashboard, General and FancyZones in the navigation pane.
+        private static readonly HashSet<Type> ForkVisiblePages = new() { typeof(DashboardPage), typeof(GeneralPage), typeof(FancyZonesPage) };
+
+        private static void HideNonFancyZonesNavigationItems(NavigationViewItem[] topLevelItems)
+        {
+            foreach (var parent in topLevelItems)
+            {
+                var children = parent.MenuItems.OfType<NavigationViewItem>().ToArray();
+                if (children.Length == 0)
+                {
+                    var pageType = parent.GetValue(NavHelper.NavigateToProperty) as Type;
+                    parent.Visibility = pageType != null && ForkVisiblePages.Contains(pageType) ? Visibility.Visible : Visibility.Collapsed;
+                    continue;
+                }
+
+                var anyVisible = false;
+                foreach (var child in children)
+                {
+                    var visible = ForkVisiblePages.Contains(child.GetValue(NavHelper.NavigateToProperty) as Type);
+                    child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                    anyVisible |= visible;
+                }
+
+                parent.Visibility = anyVisible ? Visibility.Visible : Visibility.Collapsed;
+            }
         }
 
         public static int SendDefaultIPCMessage(string msg)
