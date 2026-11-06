@@ -118,6 +118,9 @@ jobs:
         shell: pwsh
         working-directory: src-tree
         run: |
+          # The CmdPal versioning package lives on a Microsoft-internal feed. The script reports that
+          # with a non-terminating Write-Error, which must not stop the build.
+          $ErrorActionPreference = 'Continue'
           .\tools\build\build-installer.ps1 -Platform x64 -Configuration Release -PerUser true -Version $env:VERSION -Force
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
