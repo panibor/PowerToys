@@ -86,7 +86,7 @@ namespace Microsoft.PowerToys.Settings.UI.OOBE.Views
             RegexOptions.Compiled);
 
         private static readonly CompositeFormat GitHubPrLinkTemplate = CompositeFormat.Parse("[#{0}](https://github.com/microsoft/PowerToys/pull/{0})");
-        private static readonly CompositeFormat GitHubReleaseLinkTemplate = CompositeFormat.Parse("https://github.com/microsoft/PowerToys/releases/tag/{0}");
+        private static readonly CompositeFormat GitHubReleaseLinkTemplate = CompositeFormat.Parse("https://github.com/panibor/PowerToys/releases/tag/{0}");
 
         private static (string Markdown, string HeroImageUrl) ProcessReleaseNotesMarkdown(IList<PowerToysReleaseInfo> releases)
         {

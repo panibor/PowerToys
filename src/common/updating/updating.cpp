@@ -15,8 +15,8 @@ using namespace registry::install_scope;
 
 namespace // Strings in this namespace should not be localized
 {
-    const wchar_t LATEST_RELEASE_ENDPOINT[] = L"https://api.github.com/repos/microsoft/PowerToys/releases/latest";
-    const wchar_t ALL_RELEASES_ENDPOINT[] = L"https://api.github.com/repos/microsoft/PowerToys/releases?per_page=100";
+    const wchar_t LATEST_RELEASE_ENDPOINT[] = L"https://api.github.com/repos/panibor/PowerToys/releases/latest";
+    const wchar_t ALL_RELEASES_ENDPOINT[] = L"https://api.github.com/repos/panibor/PowerToys/releases?per_page=100";
 
     const wchar_t LOCAL_BUILD_ERROR[] = L"Local build cannot be updated";
     const wchar_t NETWORK_ERROR[] = L"Network error";

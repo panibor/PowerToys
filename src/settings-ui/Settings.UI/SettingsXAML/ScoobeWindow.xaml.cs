@@ -155,7 +155,7 @@ namespace Microsoft.PowerToys.Settings.UI
             httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "PowerToys");
 
             string json = await RetryWithBackoffAsync(
-                () => httpClient.GetStringAsync("https://api.github.com/repos/microsoft/PowerToys/releases?per_page=100"),
+                () => httpClient.GetStringAsync("https://api.github.com/repos/panibor/PowerToys/releases?per_page=100"),
                 Task.Delay);
             var allReleases = JsonSerializer.Deserialize<IList<PowerToysReleaseInfo>>(json, SourceGenerationContextContext.Default.IListPowerToysReleaseInfo);
 
