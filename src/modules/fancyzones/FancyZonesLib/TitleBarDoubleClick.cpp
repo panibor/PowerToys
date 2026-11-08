@@ -43,8 +43,8 @@ ZoneIndexSet TitleBarDoubleClick::ZoneWithLargestOverlap(const ZonesMap& zones, 
     for (const auto& [index, zone] : zones)
     {
         const RECT zoneRect = zone.GetZoneRect();
-        const long long width = static_cast<long long>(std::min(rect.right, zoneRect.right)) - std::max(rect.left, zoneRect.left);
-        const long long height = static_cast<long long>(std::min(rect.bottom, zoneRect.bottom)) - std::max(rect.top, zoneRect.top);
+        const long long width = static_cast<long long>((std::min)(rect.right, zoneRect.right)) - (std::max)(rect.left, zoneRect.left);
+        const long long height = static_cast<long long>((std::min)(rect.bottom, zoneRect.bottom)) - (std::max)(rect.top, zoneRect.top);
         if (width <= 0 || height <= 0)
         {
             continue;
