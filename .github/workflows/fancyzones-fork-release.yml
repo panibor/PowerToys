@@ -1,5 +1,8 @@
 # FancyZones fork: rebase main-fork onto upstream main, build the per-user x64 installer
 # and publish it as a release on this fork so the in-app updater picks it up.
+# A test build (run from any branch with test_build on) builds that branch the same way but only
+# uploads the installer as a run artifact. It pushes nothing and makes no release, so the updater
+# never sees it.
 name: FancyZones fork release
 
 on:
@@ -11,16 +14,21 @@ on:
         description: "Build even if upstream has not moved since the last release"
         type: boolean
         default: false
+      test_build:
+        description: "Test build of the selected branch: installer as a run artifact only, no push, no release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: fancyzones-fork-release
+  group: fancyzones-fork-${{ inputs.test_build && github.ref_name || 'release' }}
   cancel-in-progress: false
 
 env:
-  FORK_BRANCH: main-fork
+  FORK_BRANCH: ${{ inputs.test_build && github.ref_name || 'main-fork' }}
+  TEST_BUILD: ${{ inputs.test_build && 'true' || 'false' }}
   UPSTREAM_REPO: https://github.com/microsoft/PowerToys.git
 
 jobs:
@@ -64,7 +72,7 @@ jobs:
           UPSTREAM_SHA: ${{ steps.rebase.outputs.upstream_sha }}
         run: |
           last=$(gh release view --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | sed -n 's/^Upstream: \([0-9a-f]*\).*/\1/p' || true)
-          if [ "${{ inputs.force }}" = "true" ] || [ "$last" != "$UPSTREAM_SHA" ]; then
+          if [ "$TEST_BUILD" = "true" ] || [ "${{ inputs.force }}" = "true" ] || [ "$last" != "$UPSTREAM_SHA" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "Upstream has not moved since the last release ($last). Skipping."
@@ -76,6 +84,10 @@ jobs:
         env:
           HAS_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN != '' }}
         run: |
+          if [ "$TEST_BUILD" = "true" ]; then
+            echo "Test build, so $FORK_BRANCH is not pushed."
+            exit 0
+          fi
           if [ "$HAS_PUSH_TOKEN" != "true" ]; then
             echo "::warning::FORK_PUSH_TOKEN is not set, so the rebased $FORK_BRANCH is built but not pushed."
             exit 0
@@ -144,6 +156,17 @@ jobs:
           .\tools\build\build-installer.ps1 -Platform x64 -Configuration Release -PerUser true -Version $env:VERSION -Force
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Run FancyZones unit tests
+        shell: pwsh
+        working-directory: src-tree
+        run: |
+          $dll = "x64\Release\tests\FancyZones.UnitTests\FancyZones.UnitTests.dll"
+          if (-not (Test-Path $dll)) { throw "FancyZones unit tests were not built ($dll)" }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $vstest = Join-Path $vs "Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
+          & $vstest $dll /Platform:x64 /logger:"console;verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Collect installer
         id: collect
         shell: pwsh
@@ -154,7 +177,8 @@ jobs:
             Select-Object -First 1
           if (-not $setup) { throw "Per-user x64 installer not found" }
           New-Item -ItemType Directory -Force ..\out | Out-Null
-          $name = "PowerToysUserSetup-FancyZonesFork-$env:VERSION-x64.exe"
+          $suffix = if ($env:TEST_BUILD -eq 'true') { "-test" } else { "" }
+          $name = "PowerToysUserSetup-FancyZonesFork-$env:VERSION$suffix-x64.exe"
           Copy-Item $setup.FullName "..\out\$name"
           Get-FileHash "..\out\$name" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $name" } | Set-Content "..\out\$name.sha256"
           Get-ChildItem ..\out
@@ -167,6 +191,7 @@ jobs:
 
   release:
     needs: [sync, build]
+    if: inputs.test_build != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
