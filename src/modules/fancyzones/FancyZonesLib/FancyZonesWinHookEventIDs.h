@@ -22,5 +22,6 @@ extern UINT WM_PRIV_SAVE_EDITOR_PARAMETERS; // Scheduled to request saving edito
 extern UINT WM_PRIV_MONITOR_ROTATION_PREVIEW_SHOW; // Scheduled when the monitor rotation preview should be shown
 extern UINT WM_PRIV_MONITOR_ROTATION_PREVIEW_HIDE; // Scheduled when the monitor rotation preview should be hidden
 extern UINT WM_PRIV_MONITOR_ROTATION_PREVIEW_ROTATE; // Scheduled when monitor rotation preview should rotate windows
+extern UINT WM_PRIV_TITLEBAR_DOUBLECLICK; // Scheduled when a window that is not maximized is double-clicked
 
 void InitializeWinhookEventIds();

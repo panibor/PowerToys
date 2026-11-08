@@ -58,6 +58,7 @@ struct Settings
     bool systemTheme = true;
     bool showZoneNumber = true;
     bool allowSnapChildWindows = false;
+    bool titleBarDoubleClickSnap = true;
     bool disableRoundCorners = false;
     std::wstring zoneColor = L"#AACDFF";
     std::wstring zoneBorderColor = L"#FFFFFF";

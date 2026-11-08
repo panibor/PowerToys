@@ -35,6 +35,7 @@ namespace NonLocalizable
     const wchar_t SpanZonesAcrossMonitorsID[] = L"fancyzones_span_zones_across_monitors";
     const wchar_t MakeDraggedWindowTransparentID[] = L"fancyzones_makeDraggedWindowTransparent";
     const wchar_t AllowChildWindowSnapID[] = L"fancyzones_allowChildWindowSnap";
+    const wchar_t TitleBarDoubleClickSnapID[] = L"fancyzones_titleBarDoubleClickSnap";
     const wchar_t DisableRoundCornersOnSnapping[] = L"fancyzones_disableRoundCornersOnSnap";
 
     const wchar_t SystemThemeID[] = L"fancyzones_systemTheme";
@@ -139,6 +140,7 @@ void FancyZonesSettings::LoadSettings()
         SetBoolFlag(values, NonLocalizable::SystemThemeID, SettingId::SystemTheme, m_settings.systemTheme);
         SetBoolFlag(values, NonLocalizable::ShowZoneNumberID, SettingId::ShowZoneNumber, m_settings.showZoneNumber);
         SetBoolFlag(values, NonLocalizable::AllowChildWindowSnapID, SettingId::AllowSnapChildWindows, m_settings.allowSnapChildWindows);
+        SetBoolFlag(values, NonLocalizable::TitleBarDoubleClickSnapID, SettingId::TitleBarDoubleClickSnap, m_settings.titleBarDoubleClickSnap);
         SetBoolFlag(values, NonLocalizable::DisableRoundCornersOnSnapping, SettingId::DisableRoundCornersOnSnapping, m_settings.disableRoundCorners);
 
         // colors

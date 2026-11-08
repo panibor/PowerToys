@@ -62,6 +62,7 @@
     <ClInclude Include="ModuleConstants.h" />
     <ClInclude Include="MonitorUtils.h" />
     <ClInclude Include="PendingNewWindows.h" />
+    <ClInclude Include="TitleBarDoubleClick.h" />
     <ClInclude Include="WorkAreaConfiguration.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Generated Files/resource.h" />
@@ -122,6 +123,7 @@
     <ClCompile Include="LayoutAssignedWindows.cpp" />
     <ClCompile Include="MonitorUtils.cpp" />
     <ClCompile Include="PendingNewWindows.cpp" />
+    <ClCompile Include="TitleBarDoubleClick.cpp" />
     <ClCompile Include="WorkAreaConfiguration.cpp" />
     <ClCompile Include="OnThreadExecutor.cpp" />
     <ClCompile Include="pch.cpp">

@@ -3607,6 +3607,9 @@ Right-click to remove the key combination, thereby deactivating the shortcut.</v
   <data name="FancyZones_AllowChildWindowSnap.Content" xml:space="preserve">
     <value>Allow child windows snapping</value>
   </data>
+  <data name="FancyZones_TitleBarDoubleClickSnap.Content" xml:space="preserve">
+    <value>Double-click a title bar to fill the window's zone instead of maximizing</value>
+  </data>
   <data name="Shell_WhatsNew.Content" xml:space="preserve">
     <value>What's new</value>
   </data>

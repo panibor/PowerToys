@@ -72,6 +72,9 @@
     <ClCompile Include="PendingNewWindows.Spec.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="TitleBarDoubleClick.Spec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">

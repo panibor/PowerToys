@@ -86,6 +86,7 @@ namespace Microsoft.PowerToys.Settings.UI.ViewModels
             _makeDraggedWindowTransparent = Settings.Properties.FancyzonesMakeDraggedWindowTransparent.Value;
             _allowPopupWindowSnap = Settings.Properties.FancyzonesAllowPopupWindowSnap.Value;
             _allowChildWindowSnap = Settings.Properties.FancyzonesAllowChildWindowSnap.Value;
+            _titleBarDoubleClickSnap = Settings.Properties.FancyzonesTitleBarDoubleClickSnap.Value;
             _disableRoundCornersOnSnap = Settings.Properties.FancyzonesDisableRoundCornersOnSnap.Value;
             _highlightOpacity = Settings.Properties.FancyzonesHighlightOpacity.Value;
             _excludedApps = Settings.Properties.FancyzonesExcludedApps.Value;
@@ -189,6 +190,7 @@ namespace Microsoft.PowerToys.Settings.UI.ViewModels
         private bool _showZoneNumber;
         private bool _allowPopupWindowSnap;
         private bool _allowChildWindowSnap;
+        private bool _titleBarDoubleClickSnap;
         private bool _disableRoundCornersOnSnap;
 
         private int _highlightOpacity;
@@ -699,6 +701,24 @@ namespace Microsoft.PowerToys.Settings.UI.ViewModels
                 {
                     _allowChildWindowSnap = value;
                     Settings.Properties.FancyzonesAllowChildWindowSnap.Value = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+
+        public bool TitleBarDoubleClickSnap
+        {
+            get
+            {
+                return _titleBarDoubleClickSnap;
+            }
+
+            set
+            {
+                if (value != _titleBarDoubleClickSnap)
+                {
+                    _titleBarDoubleClickSnap = value;
+                    Settings.Properties.FancyzonesTitleBarDoubleClickSnap.Value = value;
                     NotifyPropertyChanged();
                 }
             }

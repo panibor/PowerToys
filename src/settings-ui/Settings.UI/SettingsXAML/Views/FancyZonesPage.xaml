@@ -252,6 +252,9 @@
                             <tkcontrols:SettingsCard Name="FancyZonesAllowChildWindowSnap" ContentAlignment="Left">
                                 <CheckBox x:Uid="FancyZones_AllowChildWindowSnap" IsChecked="{x:Bind ViewModel.AllowChildWindowSnap, Mode=TwoWay}" />
                             </tkcontrols:SettingsCard>
+                            <tkcontrols:SettingsCard Name="FancyZonesTitleBarDoubleClickSnap" ContentAlignment="Left">
+                                <CheckBox x:Uid="FancyZones_TitleBarDoubleClickSnap" IsChecked="{x:Bind ViewModel.TitleBarDoubleClickSnap, Mode=TwoWay}" />
+                            </tkcontrols:SettingsCard>
                             <tkcontrols:SettingsCard
                                 Name="FancyZonesDisableRoundCornersOnWindowSnap"
                                 ContentAlignment="Left"

@@ -28,6 +28,7 @@
 #include <FancyZonesLib/PendingNewWindows.h>
 #include <FancyZonesLib/Settings.h>
 #include <FancyZonesLib/SettingsObserver.h>
+#include <FancyZonesLib/TitleBarDoubleClick.h>
 #include <FancyZonesLib/trace.h>
 #include <FancyZonesLib/util.h>
 #include <FancyZonesLib/VirtualDesktop.h>
@@ -93,6 +94,12 @@ namespace
     // shows and hides again right away (e.g. 3ds Max's MAXScript Debugger during startup) are left alone.
     constexpr UINT_PTR NewWindowSettleTimerId = 0x4E575354;
     constexpr UINT NewWindowSettleDelayMillis = 100;
+
+    // After a title bar double click, Windows maximizes the window asynchronously in the window's own
+    // thread. The window is checked at this interval until it's maximized or the wait is over.
+    constexpr UINT_PTR TitleBarDoubleClickTimerId = 0x54424443;
+    constexpr UINT TitleBarDoubleClickPollMillis = 25;
+    constexpr ULONGLONG TitleBarDoubleClickWaitMillis = 600;
 
     struct WindowRotationSnapshot
     {
@@ -240,7 +247,7 @@ struct FancyZones : public winrt::implements<FancyZones, IFancyZones, IFancyZone
 {
 public:
     FancyZones(HINSTANCE hinstance, std::function<void()> disableModuleCallbackFunction) noexcept :
-        SettingsObserver({ SettingId::EditorHotkey, SettingId::WindowSwitching, SettingId::PrevTabHotkey, SettingId::NextTabHotkey, SettingId::SpanZonesAcrossMonitors, SettingId::MonitorRotation, SettingId::MonitorRotationHotkey }),
+        SettingsObserver({ SettingId::EditorHotkey, SettingId::WindowSwitching, SettingId::PrevTabHotkey, SettingId::NextTabHotkey, SettingId::SpanZonesAcrossMonitors, SettingId::MonitorRotation, SettingId::MonitorRotationHotkey, SettingId::TitleBarDoubleClickSnap }),
         m_hinstance(hinstance),
         m_draggingState([this]() {
             PostMessageW(m_window, WM_PRIV_LOCATIONCHANGE, NULL, NULL);
@@ -256,6 +263,9 @@ public:
 
             PostMessageW(m_window, WM_PRIV_WHEEL_LAYOUT_SWITCH, up ? 1 : 0, NULL);
             return true;
+        }),
+        m_titleBarDoubleClickHook([this](HWND window) {
+            PostMessageW(m_window, WM_PRIV_TITLEBAR_DOUBLECLICK, reinterpret_cast<WPARAM>(window), NULL);
         })
     {
         if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL))
@@ -371,6 +381,12 @@ private:
     void SwitchLayout(WorkArea* workArea, const LayoutData& layout) noexcept;
     void FlashZones() noexcept;
 
+    void UpdateTitleBarDoubleClickHook() noexcept;
+    void OnTitleBarDoubleClick(HWND window) noexcept;
+    void CheckTitleBarDoubleClickWindow() noexcept;
+    void ZoneMaximizedWindow(HWND window) noexcept;
+    void RestoreZonedWindow(HWND window) noexcept;
+
     HMONITOR WorkAreaKeyFromWindow(HWND window) noexcept;
 
     virtual void SettingsUpdate(SettingId type) override;
@@ -387,6 +403,11 @@ private:
     std::optional<bool> m_pendingMonitorRotationReverse;
     std::unordered_map<HMONITOR, size_t> m_monitorRotationContentNumbers;
     PendingNewWindows m_pendingNewWindows{ NewWindowSettleDelayMillis };
+
+    TitleBarDoubleClickHook m_titleBarDoubleClickHook;
+    HWND m_titleBarDoubleClickWindow{}; // double-clicked window that is expected to get maximized
+    ULONGLONG m_titleBarDoubleClickTime{};
+    std::unordered_map<HWND, RECT> m_titleBarZonedWindows; // windows zoned by a double click -> rect before that
 
     wil::unique_handle m_terminateEditorEvent; // Handle of FancyZonesEditor.exe we launch and wait on
 
@@ -486,6 +507,8 @@ FancyZones::Run() noexcept
     AppliedLayouts::instance().AdjustWorkAreaIds(monitors);
     AppZoneHistory::instance().AdjustWorkAreaIds(monitors);
 
+    UpdateTitleBarDoubleClickHook();
+
     PostMessage(m_window, WM_PRIV_INIT, 0, 0);
 }
 
@@ -493,6 +516,7 @@ FancyZones::Run() noexcept
 IFACEMETHODIMP_(void)
 FancyZones::Destroy() noexcept
 {
+    m_titleBarDoubleClickHook.disable();
     m_workAreaConfiguration.Clear();
     BufferedPaintUnInit();
     if (m_window)
@@ -1067,6 +1091,11 @@ LRESULT FancyZones::WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         {
             auto hwnd = reinterpret_cast<HWND>(wparam);
             m_pendingNewWindows.Remove(hwnd);
+            m_titleBarZonedWindows.erase(hwnd);
+            if (m_titleBarDoubleClickWindow == hwnd)
+            {
+                m_titleBarDoubleClickWindow = nullptr;
+            }
             // If the destroyed window was being dragged, abort the drag without
             // snapping. Calling MoveSizeEnd() here would snap the now-destroyed
             // HWND into a zone and corrupt the layout state.
@@ -1101,6 +1130,14 @@ LRESULT FancyZones::WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         else if (message == WM_PRIV_QUICK_LAYOUT_KEY)
         {
             ApplyQuickLayout(static_cast<int>(lparam));
+        }
+        else if (message == WM_PRIV_TITLEBAR_DOUBLECLICK)
+        {
+            OnTitleBarDoubleClick(reinterpret_cast<HWND>(wparam));
+        }
+        else if (message == WM_TIMER && wparam == TitleBarDoubleClickTimerId)
+        {
+            CheckTitleBarDoubleClickWindow();
         }
         else if (message == WM_PRIV_WHEEL_LAYOUT_SWITCH)
         {
@@ -1669,6 +1706,11 @@ void FancyZones::SettingsUpdate(SettingId id)
         }
     }
     break;
+    case SettingId::TitleBarDoubleClickSnap:
+    {
+        UpdateTitleBarDoubleClickHook();
+    }
+    break;
     case SettingId::SpanZonesAcrossMonitors:
     {
         // See UpdateWorkAreas() - same WindowMouseSnap dangling-WorkArea*
@@ -1846,6 +1888,167 @@ void FancyZones::FlashZones() noexcept
             }
         }
     }
+}
+
+void FancyZones::UpdateTitleBarDoubleClickHook() noexcept
+{
+    if (FancyZonesSettings::settings().titleBarDoubleClickSnap)
+    {
+        m_titleBarDoubleClickHook.enable();
+    }
+    else
+    {
+        m_titleBarDoubleClickHook.disable();
+        KillTimer(m_window, TitleBarDoubleClickTimerId);
+        m_titleBarDoubleClickWindow = nullptr;
+    }
+}
+
+void FancyZones::OnTitleBarDoubleClick(HWND window) noexcept
+{
+    if (!FancyZonesSettings::settings().titleBarDoubleClickSnap || !IsWindow(window) || IsZoomed(window))
+    {
+        return;
+    }
+
+    // The double click may have been anywhere in the window. Only a title bar double click makes
+    // Windows maximize it, so wait and see whether that happens.
+    m_titleBarDoubleClickWindow = window;
+    m_titleBarDoubleClickTime = GetTickCount64();
+    if (SetTimer(m_window, TitleBarDoubleClickTimerId, TitleBarDoubleClickPollMillis, nullptr) == 0)
+    {
+        Logger::error(L"Failed to start the title bar double click timer, {}", get_last_error_or_default(GetLastError()));
+        m_titleBarDoubleClickWindow = nullptr;
+    }
+}
+
+void FancyZones::CheckTitleBarDoubleClickWindow() noexcept
+{
+    const HWND window = m_titleBarDoubleClickWindow;
+    if (!window || !IsWindow(window))
+    {
+        KillTimer(m_window, TitleBarDoubleClickTimerId);
+        m_titleBarDoubleClickWindow = nullptr;
+        return;
+    }
+
+    if (!IsZoomed(window))
+    {
+        if (GetTickCount64() - m_titleBarDoubleClickTime > TitleBarDoubleClickWaitMillis)
+        {
+            KillTimer(m_window, TitleBarDoubleClickTimerId);
+            m_titleBarDoubleClickWindow = nullptr;
+        }
+        return;
+    }
+
+    KillTimer(m_window, TitleBarDoubleClickTimerId);
+    m_titleBarDoubleClickWindow = nullptr;
+
+    if (!FancyZonesWindowProcessing::IsProcessableManually(window))
+    {
+        return;
+    }
+
+    // A zoned window goes back to the size it had before it was zoned, any other window fills its zone
+    if (!FancyZonesWindowProperties::RetrieveZoneIndexProperty(window).empty())
+    {
+        RestoreZonedWindow(window);
+    }
+    else
+    {
+        ZoneMaximizedWindow(window);
+    }
+}
+
+void FancyZones::ZoneMaximizedWindow(HWND window) noexcept
+{
+    auto workArea = m_workAreaConfiguration.GetWorkAreaFromWindow(window);
+    if (!workArea || !workArea->GetLayout() || workArea->GetLayout()->Zones().empty())
+    {
+        // No zones here, so keep the normal maximize
+        return;
+    }
+
+    const auto& layout = workArea->GetLayout();
+
+    // The window is maximized already, its normal rect is where it was before the double click.
+    // rcNormalPosition is in workspace coordinates, which start at the work area of the monitor.
+    WINDOWPLACEMENT placement{ sizeof(WINDOWPLACEMENT) };
+    if (!GetWindowPlacement(window, &placement))
+    {
+        return;
+    }
+
+    RECT normalRect = placement.rcNormalPosition;
+    MONITORINFO monitorInfo{ sizeof(MONITORINFO) };
+    if ((GetWindowLong(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0 &&
+        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+    {
+        OffsetRect(&normalRect, monitorInfo.rcWork.left - monitorInfo.rcMonitor.left, monitorInfo.rcWork.top - monitorInfo.rcMonitor.top);
+    }
+
+    // Zones are in work area coordinates
+    const auto& workAreaRect = workArea->GetWorkAreaRect();
+    RECT rectInWorkArea = normalRect;
+    OffsetRect(&rectInWorkArea, -workAreaRect.left(), -workAreaRect.top());
+
+    ZoneIndexSet zones = TitleBarDoubleClick::ZoneWithLargestOverlap(layout->Zones(), rectInWorkArea);
+    if (zones.empty())
+    {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        cursor.x -= workAreaRect.left();
+        cursor.y -= workAreaRect.top();
+        zones = layout->ZonesFromPoint(cursor);
+    }
+
+    if (zones.empty() || !workArea->Snap(window, zones, false))
+    {
+        return;
+    }
+
+    m_titleBarZonedWindows[window] = normalRect;
+    TitleBarDoubleClick::SaveRestoreRect(window, normalRect);
+
+    const auto zonesRect = layout->GetCombinedZonesRect(zones);
+    const auto adjustedRect = FancyZonesWindowUtils::AdjustRectForSizeWindowToRect(window, zonesRect, workArea->GetWorkAreaWindow());
+    FancyZonesWindowUtils::SizeWindowToRect(window, adjustedRect);
+    Logger::info(L"Title bar double click: window zoned");
+}
+
+void FancyZones::RestoreZonedWindow(HWND window) noexcept
+{
+    std::optional<RECT> rect;
+    if (auto it = m_titleBarZonedWindows.find(window); it != m_titleBarZonedWindows.end())
+    {
+        rect = it->second;
+        m_titleBarZonedWindows.erase(it);
+    }
+    else
+    {
+        // Zoned by dragging or with the keyboard: use the size saved when it was first snapped
+        rect = TitleBarDoubleClick::RetrieveRestoreRect(window);
+    }
+
+    if (!rect.has_value())
+    {
+        // Nothing to go back to, so keep the normal maximize
+        return;
+    }
+
+    if (auto workArea = m_workAreaConfiguration.GetWorkAreaFromWindow(window))
+    {
+        workArea->Unsnap(window);
+    }
+    else
+    {
+        FancyZonesWindowProperties::RemoveZoneIndexProperty(window);
+    }
+
+    TitleBarDoubleClick::RemoveRestoreRect(window);
+    FancyZonesWindowUtils::SizeWindowToRect(window, rect.value());
+    Logger::info(L"Title bar double click: window restored");
 }
 
 HMONITOR FancyZones::WorkAreaKeyFromWindow(HWND window) noexcept

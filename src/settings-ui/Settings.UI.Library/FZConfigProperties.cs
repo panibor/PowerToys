@@ -60,6 +60,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
             FancyzonesMakeDraggedWindowTransparent = new BoolProperty();
             FancyzonesAllowPopupWindowSnap = new BoolProperty();
             FancyzonesAllowChildWindowSnap = new BoolProperty();
+            FancyzonesTitleBarDoubleClickSnap = new BoolProperty(true);
             FancyzonesDisableRoundCornersOnSnap = new BoolProperty();
             FancyzonesExcludedApps = new StringProperty();
             FancyzonesInActiveColor = new StringProperty(ConfigDefaults.DefaultFancyZonesInActiveColor);
@@ -132,6 +133,9 @@ namespace Microsoft.PowerToys.Settings.UI.Library
 
         [JsonPropertyName("fancyzones_allowChildWindowSnap")]
         public BoolProperty FancyzonesAllowChildWindowSnap { get; set; }
+
+        [JsonPropertyName("fancyzones_titleBarDoubleClickSnap")]
+        public BoolProperty FancyzonesTitleBarDoubleClickSnap { get; set; }
 
         [JsonPropertyName("fancyzones_disableRoundCornersOnSnap")]
         public BoolProperty FancyzonesDisableRoundCornersOnSnap { get; set; }

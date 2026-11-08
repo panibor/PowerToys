@@ -43,5 +43,6 @@ enum class SettingId
     MonitorRotationHotkey,
     ExcludedApps,
     AllowSnapChildWindows,
+    TitleBarDoubleClickSnap,
     DisableRoundCornersOnSnapping,
 };
