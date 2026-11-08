@@ -36,7 +36,7 @@ namespace updating
         // architecture varies. If the product is ever renamed (e.g. a stable/GA build that drops
         // "(Preview)"), this constant MUST be updated in lockstep, otherwise a legitimate installer
         // would be rejected here in the elevated update path.
-        constexpr const wchar_t* POWERTOYS_PRODUCT_NAME_PREFIX = L"PowerToys (Preview)";
+        constexpr const wchar_t* POWERTOYS_PRODUCT_NAME_PREFIX = L"PowerToys FancyZones Fork";
 
         // Reads the signer leaf certificate's Organization (O) from the ALREADY-VERIFIED
         // WinVerifyTrust state and returns true only when it is "Microsoft Corporation". Reading
@@ -278,6 +278,19 @@ namespace updating
 
         trustData.dwStateAction = WTD_STATEACTION_CLOSE;
         WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &actionGuid, &trustData);
+
+        // FancyZones fork: fork releases are unsigned. Accept an unsigned installer only when it
+        // carries the fork installer's identity. Signed non-Microsoft installers are still refused below.
+        if (status == static_cast<LONG>(TRUST_E_NOSIGNATURE))
+        {
+            if (!is_expected_powertoys_installer(installerPath))
+            {
+                Logger::error(L"Unsigned installer '{}' is not the FancyZones fork installer; refusing to run it elevated", installerPath);
+                return false;
+            }
+            Logger::warn(L"Installer '{}' is unsigned; accepted as the FancyZones fork installer", installerPath);
+            return true;
+        }
 
         if (status != ERROR_SUCCESS)
         {

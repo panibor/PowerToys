@@ -391,7 +391,7 @@ namespace interop_auth
             bool signatureOk = true;
             if (policy.requireMicrosoftSignature)
             {
-#ifdef _DEBUG
+#if 1 // FancyZones fork: fork releases are unsigned, so skip the Microsoft signature check like DEBUG builds do.
                 // DEV-ONLY: local builds are not Microsoft-signed. Directory, basename and version are
                 // still enforced above. This relaxation is physically compiled out of Release.
                 signatureOk = true;
