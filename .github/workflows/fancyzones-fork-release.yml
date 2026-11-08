@@ -183,6 +183,8 @@ jobs:
             }
             Write-Host "::warning::Test host stopped early (vstest exit $exit) after $($all.Count) tests, none failed. See the test-results artifact."
           }
+          # vstest's exit code would otherwise become the step's exit code
+          exit 0
 
       - uses: actions/upload-artifact@v4
         if: always()
