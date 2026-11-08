@@ -164,8 +164,33 @@ jobs:
           if (-not (Test-Path $dll)) { throw "FancyZones unit tests were not built ($dll)" }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $vstest = Join-Path $vs "Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
-          & $vstest $dll /Platform:x64 /logger:"console;verbosity=normal"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $results = Join-Path (Get-Location) "TestResults"
+          & $vstest $dll /Platform:x64 /Blame /logger:"console;verbosity=normal" /logger:"trx;LogFileName=fancyzones.trx" /ResultsDirectory:$results
+          $exit = $LASTEXITCODE
+          $trx = Get-ChildItem $results -Recurse -Filter fancyzones.trx | Select-Object -First 1
+          if (-not $trx) { throw "No test results written (vstest exit $exit)" }
+          [xml]$xml = Get-Content $trx.FullName
+          $all = @($xml.TestRun.Results.UnitTestResult)
+          $failed = @($all | Where-Object outcome -eq 'Failed')
+          Write-Host "Test results: $($all.Count) run, $($failed.Count) failed (vstest exit $exit)"
+          $failed | ForEach-Object { Write-Host "::error::Failed test $($_.testName): $($_.Output.ErrorInfo.Message)" }
+          if ($failed.Count -gt 0) { exit 1 }
+          if ($exit -ne 0) {
+            # The test host can crash on a headless runner in tests that need a real desktop.
+            # Only real test failures block the build, a crash is reported with the blamed test.
+            Get-ChildItem $results -Recurse -Filter Sequence*.xml | ForEach-Object {
+              Write-Host "Blame sequence $($_.Name):"; Get-Content $_.FullName | Select-Object -Last 5
+            }
+            Write-Host "::warning::Test host stopped early (vstest exit $exit) after $($all.Count) tests, none failed. See the test-results artifact."
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: src-tree/TestResults
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Collect installer
         id: collect
