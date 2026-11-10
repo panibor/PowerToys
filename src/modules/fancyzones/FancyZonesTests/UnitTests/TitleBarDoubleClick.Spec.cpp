@@ -131,4 +131,58 @@ namespace FancyZonesUnitTests
             Assert::AreEqual(ZoneIndex{ 0 }, result[0]);
         }
     };
+    TEST_CLASS (SwallowedClickUnitTests)
+    {
+        TEST_METHOD (ReleaseOfNormalPressGoesThrough)
+        {
+            SwallowedClick click;
+            click.OnButtonDown(false);
+            Assert::IsFalse(click.OnButtonUp());
+        }
+
+        TEST_METHOD (ReleaseOfSwallowedPressIsSwallowed)
+        {
+            SwallowedClick click;
+            click.OnButtonDown(true);
+            Assert::IsTrue(click.OnButtonUp());
+        }
+
+        TEST_METHOD (OnlyOneReleaseIsSwallowed)
+        {
+            SwallowedClick click;
+            click.OnButtonDown(true);
+            click.OnButtonUp();
+            Assert::IsFalse(click.OnButtonUp());
+        }
+
+        TEST_METHOD (NewPressCancelsPendingSwallow)
+        {
+            SwallowedClick click;
+            click.OnButtonDown(true);
+            click.OnButtonDown(false);
+            Assert::IsFalse(click.OnButtonUp());
+        }
+
+        TEST_METHOD (ReleaseWithoutPressGoesThrough)
+        {
+            SwallowedClick click;
+            Assert::IsFalse(click.OnButtonUp());
+        }
+    };
+
+    TEST_CLASS (CaptionHitUnitTests)
+    {
+        TEST_METHOD (CaptionIsTitleBar)
+        {
+            Assert::IsTrue(TitleBarDoubleClick::IsCaptionHit(HTCAPTION));
+        }
+
+        TEST_METHOD (OtherAreasAreNotTitleBar)
+        {
+            for (LRESULT hit : { HTCLIENT, HTNOWHERE, HTTRANSPARENT, HTMAXBUTTON, HTMINBUTTON, HTCLOSE, HTSYSMENU, HTTOP, HTLEFT, HTERROR })
+            {
+                Assert::IsFalse(TitleBarDoubleClick::IsCaptionHit(hit));
+            }
+        }
+    };
 }

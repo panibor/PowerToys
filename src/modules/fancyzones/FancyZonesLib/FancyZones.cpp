@@ -264,8 +264,8 @@ public:
             PostMessageW(m_window, WM_PRIV_WHEEL_LAYOUT_SWITCH, up ? 1 : 0, NULL);
             return true;
         }),
-        m_titleBarDoubleClickHook([this](HWND window) {
-            PostMessageW(m_window, WM_PRIV_TITLEBAR_DOUBLECLICK, reinterpret_cast<WPARAM>(window), NULL);
+        m_titleBarDoubleClickHook([this](HWND window, bool swallowed) {
+            PostMessageW(m_window, WM_PRIV_TITLEBAR_DOUBLECLICK, reinterpret_cast<WPARAM>(window), swallowed ? 1 : 0);
         })
     {
         if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL))
@@ -382,10 +382,11 @@ private:
     void FlashZones() noexcept;
 
     void UpdateTitleBarDoubleClickHook() noexcept;
-    void OnTitleBarDoubleClick(HWND window) noexcept;
+    void OnTitleBarDoubleClick(HWND window, bool swallowed) noexcept;
     void CheckTitleBarDoubleClickWindow() noexcept;
-    void ZoneMaximizedWindow(HWND window) noexcept;
-    void RestoreZonedWindow(HWND window) noexcept;
+    bool HandleTitleBarDoubleClick(HWND window, std::optional<RECT> rectBeforeMaximize) noexcept;
+    bool ZoneWindow(HWND window, const RECT& windowRect) noexcept;
+    bool RestoreZonedWindow(HWND window) noexcept;
 
     HMONITOR WorkAreaKeyFromWindow(HWND window) noexcept;
 
@@ -1133,7 +1134,7 @@ LRESULT FancyZones::WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         }
         else if (message == WM_PRIV_TITLEBAR_DOUBLECLICK)
         {
-            OnTitleBarDoubleClick(reinterpret_cast<HWND>(wparam));
+            OnTitleBarDoubleClick(reinterpret_cast<HWND>(wparam), lparam != 0);
         }
         else if (message == WM_TIMER && wparam == TitleBarDoubleClickTimerId)
         {
@@ -1904,15 +1905,31 @@ void FancyZones::UpdateTitleBarDoubleClickHook() noexcept
     }
 }
 
-void FancyZones::OnTitleBarDoubleClick(HWND window) noexcept
+void FancyZones::OnTitleBarDoubleClick(HWND window, bool swallowed) noexcept
 {
-    if (!FancyZonesSettings::settings().titleBarDoubleClickSnap || !IsWindow(window) || IsZoomed(window))
+    if (!IsWindow(window))
     {
         return;
     }
 
-    // The double click may have been anywhere in the window. Only a title bar double click makes
-    // Windows maximize it, so wait and see whether that happens.
+    if (swallowed)
+    {
+        // The hook kept the double click from the window, so Windows won't maximize it. Zone it
+        // right away. When there's nothing to do, maximize it the way the double click would have.
+        if (!FancyZonesSettings::settings().titleBarDoubleClickSnap || !HandleTitleBarDoubleClick(window, std::nullopt))
+        {
+            PostMessageW(window, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+        }
+        return;
+    }
+
+    if (!FancyZonesSettings::settings().titleBarDoubleClickSnap || IsZoomed(window))
+    {
+        return;
+    }
+
+    // The hook could not tell whether this was on the title bar, so let it through. If Windows
+    // maximizes the window, it is moved into its zone afterwards.
     m_titleBarDoubleClickWindow = window;
     m_titleBarDoubleClickTime = GetTickCount64();
     if (SetTimer(m_window, TitleBarDoubleClickTimerId, TitleBarDoubleClickPollMillis, nullptr) == 0)
@@ -1945,33 +1962,6 @@ void FancyZones::CheckTitleBarDoubleClickWindow() noexcept
     KillTimer(m_window, TitleBarDoubleClickTimerId);
     m_titleBarDoubleClickWindow = nullptr;
 
-    if (!FancyZonesWindowProcessing::IsProcessableManually(window))
-    {
-        return;
-    }
-
-    // A zoned window goes back to the size it had before it was zoned, any other window fills its zone
-    if (!FancyZonesWindowProperties::RetrieveZoneIndexProperty(window).empty())
-    {
-        RestoreZonedWindow(window);
-    }
-    else
-    {
-        ZoneMaximizedWindow(window);
-    }
-}
-
-void FancyZones::ZoneMaximizedWindow(HWND window) noexcept
-{
-    auto workArea = m_workAreaConfiguration.GetWorkAreaFromWindow(window);
-    if (!workArea || !workArea->GetLayout() || workArea->GetLayout()->Zones().empty())
-    {
-        // No zones here, so keep the normal maximize
-        return;
-    }
-
-    const auto& layout = workArea->GetLayout();
-
     // The window is maximized already, its normal rect is where it was before the double click.
     // rcNormalPosition is in workspace coordinates, which start at the work area of the monitor.
     WINDOWPLACEMENT placement{ sizeof(WINDOWPLACEMENT) };
@@ -1988,9 +1978,50 @@ void FancyZones::ZoneMaximizedWindow(HWND window) noexcept
         OffsetRect(&normalRect, monitorInfo.rcWork.left - monitorInfo.rcMonitor.left, monitorInfo.rcWork.top - monitorInfo.rcMonitor.top);
     }
 
+    // When nothing can be done, the window just stays maximized
+    HandleTitleBarDoubleClick(window, normalRect);
+}
+
+bool FancyZones::HandleTitleBarDoubleClick(HWND window, std::optional<RECT> rectBeforeMaximize) noexcept
+{
+    if (!FancyZonesWindowProcessing::IsProcessableManually(window))
+    {
+        return false;
+    }
+
+    // A zoned window goes back to the size it had before it was zoned, any other window fills its zone
+    if (!FancyZonesWindowProperties::RetrieveZoneIndexProperty(window).empty())
+    {
+        return RestoreZonedWindow(window);
+    }
+
+    RECT rect{};
+    if (rectBeforeMaximize.has_value())
+    {
+        rect = rectBeforeMaximize.value();
+    }
+    else if (!GetWindowRect(window, &rect))
+    {
+        return false;
+    }
+
+    return ZoneWindow(window, rect);
+}
+
+bool FancyZones::ZoneWindow(HWND window, const RECT& windowRect) noexcept
+{
+    auto workArea = m_workAreaConfiguration.GetWorkAreaFromWindow(window);
+    if (!workArea || !workArea->GetLayout() || workArea->GetLayout()->Zones().empty())
+    {
+        // No zones here, so keep the normal maximize
+        return false;
+    }
+
+    const auto& layout = workArea->GetLayout();
+
     // Zones are in work area coordinates
     const auto& workAreaRect = workArea->GetWorkAreaRect();
-    RECT rectInWorkArea = normalRect;
+    RECT rectInWorkArea = windowRect;
     OffsetRect(&rectInWorkArea, -workAreaRect.left(), -workAreaRect.top());
 
     ZoneIndexSet zones = TitleBarDoubleClick::ZoneWithLargestOverlap(layout->Zones(), rectInWorkArea);
@@ -2005,19 +2036,20 @@ void FancyZones::ZoneMaximizedWindow(HWND window) noexcept
 
     if (zones.empty() || !workArea->Snap(window, zones, false))
     {
-        return;
+        return false;
     }
 
-    m_titleBarZonedWindows[window] = normalRect;
-    TitleBarDoubleClick::SaveRestoreRect(window, normalRect);
+    m_titleBarZonedWindows[window] = windowRect;
+    TitleBarDoubleClick::SaveRestoreRect(window, windowRect);
 
     const auto zonesRect = layout->GetCombinedZonesRect(zones);
     const auto adjustedRect = FancyZonesWindowUtils::AdjustRectForSizeWindowToRect(window, zonesRect, workArea->GetWorkAreaWindow());
     FancyZonesWindowUtils::SizeWindowToRect(window, adjustedRect);
     Logger::info(L"Title bar double click: window zoned");
+    return true;
 }
 
-void FancyZones::RestoreZonedWindow(HWND window) noexcept
+bool FancyZones::RestoreZonedWindow(HWND window) noexcept
 {
     std::optional<RECT> rect;
     if (auto it = m_titleBarZonedWindows.find(window); it != m_titleBarZonedWindows.end())
@@ -2034,7 +2066,7 @@ void FancyZones::RestoreZonedWindow(HWND window) noexcept
     if (!rect.has_value())
     {
         // Nothing to go back to, so keep the normal maximize
-        return;
+        return false;
     }
 
     if (auto workArea = m_workAreaConfiguration.GetWorkAreaFromWindow(window))
@@ -2049,6 +2081,7 @@ void FancyZones::RestoreZonedWindow(HWND window) noexcept
     TitleBarDoubleClick::RemoveRestoreRect(window);
     FancyZonesWindowUtils::SizeWindowToRect(window, rect.value());
     Logger::info(L"Title bar double click: window restored");
+    return true;
 }
 
 HMONITOR FancyZones::WorkAreaKeyFromWindow(HWND window) noexcept

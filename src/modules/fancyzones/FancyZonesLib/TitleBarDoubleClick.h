@@ -25,8 +25,28 @@ private:
     bool m_hasFirstClick = false;
 };
 
+// Swallows the button release that belongs to a swallowed press, so the window never sees half a click.
+class SwallowedClick
+{
+public:
+    void OnButtonDown(bool swallowed) noexcept { m_swallowNextUp = swallowed; }
+    // Returns true when this release must be swallowed too
+    bool OnButtonUp() noexcept
+    {
+        const bool swallow = m_swallowNextUp;
+        m_swallowNextUp = false;
+        return swallow;
+    }
+
+private:
+    bool m_swallowNextUp = false;
+};
+
 namespace TitleBarDoubleClick
 {
+    // Whether a WM_NCHITTEST result is a place where a double click maximizes the window
+    constexpr bool IsCaptionHit(LRESULT hitTest) noexcept { return hitTest == HTCAPTION; }
+
     // The zone that holds the largest part of the rect, or an empty set when the rect overlaps no zone.
     // The rect and the zones must use the same coordinates.
     ZoneIndexSet ZoneWithLargestOverlap(const ZonesMap& zones, const RECT& rect) noexcept;
@@ -41,18 +61,22 @@ namespace TitleBarDoubleClick
     void RemoveRestoreRect(HWND window) noexcept;
 }
 
-// Low-level mouse hook that reports title bar double click candidates: a double click on a window
-// that was not maximized when it was clicked. It's only installed while the setting is on.
+// Low-level mouse hook that reports title bar double clicks on windows that are not maximized.
+// When the second click is on the title bar, it is swallowed so that Windows does not maximize the
+// window first, and the callback gets swallowed=true. When the hook can't tell, the click goes through
+// and the callback gets swallowed=false. It's only installed while the setting is on.
 class TitleBarDoubleClickHook
 {
 public:
-    explicit TitleBarDoubleClickHook(std::function<void(HWND)> doubleClickCallback);
+    explicit TitleBarDoubleClickHook(std::function<void(HWND window, bool swallowed)> doubleClickCallback);
     void enable();
     void disable();
 
 private:
     static HHOOK hHook;
-    static std::function<void(HWND)> callback;
+    static std::function<void(HWND, bool)> callback;
     static DoubleClickDetector detector;
+    static SwallowedClick swallowedClick;
+    static bool IsOnTitleBar(HWND window, POINT pt) noexcept;
     static LRESULT CALLBACK MouseProc(int, WPARAM, LPARAM);
 };

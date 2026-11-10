@@ -117,10 +117,11 @@ void TitleBarDoubleClick::RemoveRestoreRect(HWND window) noexcept
 }
 
 HHOOK TitleBarDoubleClickHook::hHook = {};
-std::function<void(HWND)> TitleBarDoubleClickHook::callback = {};
+std::function<void(HWND, bool)> TitleBarDoubleClickHook::callback = {};
 DoubleClickDetector TitleBarDoubleClickHook::detector = {};
+SwallowedClick TitleBarDoubleClickHook::swallowedClick = {};
 
-TitleBarDoubleClickHook::TitleBarDoubleClickHook(std::function<void(HWND)> doubleClickCallback)
+TitleBarDoubleClickHook::TitleBarDoubleClickHook(std::function<void(HWND, bool)> doubleClickCallback)
 {
     callback = std::move(doubleClickCallback);
 }
@@ -136,6 +137,7 @@ void TitleBarDoubleClickHook::enable()
     if (!hHook)
     {
         detector.Reset();
+        swallowedClick.OnButtonDown(false);
         hHook = SetWindowsHookEx(WH_MOUSE_LL, MouseProc, GetModuleHandle(NULL), 0);
     }
 }
@@ -149,11 +151,56 @@ void TitleBarDoubleClickHook::disable()
     }
 }
 
+bool TitleBarDoubleClickHook::IsOnTitleBar(HWND window, POINT pt) noexcept
+{
+    // Windows maximizes on a double click only when the window has a maximize box
+    if ((GetWindowLong(window, GWL_STYLE) & WS_MAXIMIZEBOX) == 0)
+    {
+        return false;
+    }
+
+    // Ask the window under the cursor what is there, the way Windows does: a child that answers
+    // HTTRANSPARENT passes the question on to its parent. The timeout keeps a hung window from
+    // stalling the mouse, it then counts as not a title bar and the click goes through.
+    constexpr UINT HitTestTimeoutMillis = 50;
+    constexpr int MaxDepth = 4;
+    HWND target = WindowFromPoint(pt);
+    for (int depth = 0; target && depth < MaxDepth; ++depth)
+    {
+        // Hit test points are in the target window's own coordinates, which differ from the physical
+        // ones the hook gets for windows that are not per-monitor DPI aware
+        POINT logical = pt;
+        PhysicalToLogicalPointForPerMonitorDPI(target, &logical);
+
+        DWORD_PTR hitTest = HTNOWHERE;
+        if (!SendMessageTimeoutW(target, WM_NCHITTEST, 0, MAKELPARAM(logical.x, logical.y), SMTO_ABORTIFHUNG | SMTO_BLOCK, HitTestTimeoutMillis, &hitTest))
+        {
+            return false;
+        }
+
+        if (static_cast<LRESULT>(hitTest) != HTTRANSPARENT || target == window)
+        {
+            return TitleBarDoubleClick::IsCaptionHit(static_cast<LRESULT>(hitTest));
+        }
+
+        target = GetAncestor(target, GA_PARENT);
+    }
+
+    return false;
+}
+
 LRESULT CALLBACK TitleBarDoubleClickHook::MouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    // Runs for every mouse event in the system, so it only does cheap checks and posts the rest
+    // Runs for every mouse event in the system, so it only does cheap checks until a double click
+    // happens, and leaves the zoning to the main thread
+    if (nCode == HC_ACTION && wParam == WM_LBUTTONUP && swallowedClick.OnButtonUp())
+    {
+        return 1;
+    }
+
     if (nCode == HC_ACTION && wParam == WM_LBUTTONDOWN)
     {
+        swallowedClick.OnButtonDown(false);
         const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
         const HWND window = GetAncestor(WindowFromPoint(info->pt), GA_ROOT);
         if (window && detector.OnButtonDown(window, info->pt, info->time, GetDoubleClickTime(), GetSystemMetrics(SM_CXDOUBLECLK) / 2, GetSystemMetrics(SM_CYDOUBLECLK) / 2))
@@ -161,7 +208,13 @@ LRESULT CALLBACK TitleBarDoubleClickHook::MouseProc(int nCode, WPARAM wParam, LP
             // A double click on an already maximized title bar restores the window, leave that alone
             if (!IsZoomed(window) && callback)
             {
-                callback(window);
+                const bool swallow = IsOnTitleBar(window, info->pt);
+                callback(window, swallow);
+                if (swallow)
+                {
+                    swallowedClick.OnButtonDown(true);
+                    return 1;
+                }
             }
         }
     }
